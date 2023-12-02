@@ -13,11 +13,26 @@ import java.util.Set;
 public class RpcException extends RuntimeException {
 
     //region --字段--
+    private int code;
     private String stackTrace;
     private String source;
     //endregion
 
     //region --属性--
+
+
+    public int getCode() {
+        return code;
+    }
+
+    public void setCode(int code) {
+        this.code = code;
+    }
+
+    public String getStackTraceString() {
+        return this.stackTrace;
+    }
+
     public void setStackTrace(String value) {
         this.stackTrace = value;
     }
@@ -61,7 +76,7 @@ public class RpcException extends RuntimeException {
 
     /**
      * 初始化 {@link RpcException} 类的新实例, 带有指定的原因和一个详细消息
-     * <tt>(cause==null ?null: cause. tostring ())</tt>
+     * <tt>(cause==null ?null: cause.toString ())</tt>
      * (通常包含<tt>cause</tt>的类和详细消息). 此构造函数对于这个异常非常有用, 这些异常只不过是其他可抛出对象的包装器.
      *
      * @param cause 原因, 通过{@link #getCause()}方法保存以供以后检索 (允许<tt>null</tt>, 表示原因不存在或未知)
@@ -70,6 +85,8 @@ public class RpcException extends RuntimeException {
         super(cause);
     }
     //endregion
+
+    //region --公开方法--
 
     /**
      * Returns a short description of this throwable.
@@ -87,9 +104,10 @@ public class RpcException extends RuntimeException {
      */
     @Override
     public String toString() {
+        int code = this.getCode();
         String s = this.getSource();
         String message = this.getLocalizedMessage();
-        return (message != null) ? (s + ": " + message) : s;
+        return (message != null) ? (s + "(" + code + ")" + ": " + message) : s;
     }
 
     /**
@@ -101,7 +119,9 @@ public class RpcException extends RuntimeException {
     public void printStackTrace(PrintStream s) {
         this.printStackTrace(new WrappedPrintStream(s));
     }
+    //endregion
 
+    //region --私有方法--
     private void printStackTrace(PrintStreamOrWriter s) {
         // Guard against malicious overrides of Throwable.equals by
         // using a Set with identity equality semantics.
@@ -120,6 +140,7 @@ public class RpcException extends RuntimeException {
                 ((RpcException) ourCause).printStackTrace(s);
         }
     }
+    //endregion
 
     //region --内部类--
     private static class WrappedPrintStream extends PrintStreamOrWriter {

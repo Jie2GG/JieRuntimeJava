@@ -10,7 +10,7 @@ import java.io.Serializable;
  *
  * @author jiegg
  */
-public class JsonRpcResponse implements Serializable {
+class JsonRpcResponse implements Serializable {
 
     //region --字段--
     @JSONField(name = "ver")
@@ -119,6 +119,18 @@ public class JsonRpcResponse implements Serializable {
     public static JsonRpcResponse createError(JsonRpcResponseError error) {
         JsonRpcResponse response = new JsonRpcResponse();
         response.setError(error);
+        return response;
+    }
+
+    /**
+     * 根据返回值创建返回值
+     *
+     * @param resultValue 远程调用返回值
+     * @return 一个新的 {@link JsonRpcResponseError} 类的新实例, 包含远程调用返回值信息
+     */
+    public static JsonRpcResponse createResult(Object resultValue) {
+        JsonRpcResponse response = new JsonRpcResponse();
+        response.setResult(resultValue);
         return response;
     }
     //endregion

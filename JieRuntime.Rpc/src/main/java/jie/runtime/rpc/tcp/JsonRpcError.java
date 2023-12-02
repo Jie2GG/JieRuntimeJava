@@ -12,6 +12,8 @@ import java.io.Serializable;
 class JsonRpcError implements Serializable {
 
     //region --字段--
+    @JSONField(name = "code")
+    private int code;
     @JSONField(name = "source")
     private String source;
     @JSONField(name = "message")
@@ -23,6 +25,22 @@ class JsonRpcError implements Serializable {
     //endregion
 
     //region --属性--
+
+    /**
+     * 获取错误代码
+     */
+    public int getCode() {
+        return code;
+    }
+
+    /**
+     * 设置错误代码
+     *
+     * @param value 错误代码的值
+     */
+    public void setCode(int value) {
+        this.code = value;
+    }
 
     /**
      * 获取引起错误的应用程序或对象的名称

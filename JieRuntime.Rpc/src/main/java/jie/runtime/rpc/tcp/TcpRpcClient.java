@@ -1,18 +1,20 @@
 package jie.runtime.rpc.tcp;
 
+import com.alibaba.fastjson2.JSONException;
 import jie.runtime.net.sockets.event.ISocketClientEvent;
 import jie.runtime.net.sockets.event.SocketDataEventArgs;
 import jie.runtime.net.sockets.event.SocketEventArgs;
 import jie.runtime.net.sockets.event.SocketExceptionEventArgs;
 import jie.runtime.net.sockets.tcp.TcpClient;
 import jie.runtime.rpc.RpcClientBase;
-import jie.runtime.rpc.RpcService;
+import jie.runtime.rpc.RpcMethodConverter;
 import jie.runtime.rpc.RpcTypeConverter;
 import jie.runtime.rpc.util.JsonUtils;
 import jie.runtime.utils.GuidUtils;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.net.InetSocketAddress;
@@ -141,7 +143,7 @@ public class TcpRpcClient extends RpcClientBase {
                 }
                 // 如果结果是 null 并且获取过响应状态, 表示传输出现了问题
                 if (wait.getResult() == null && wait.isResponse()) {
-                    // TODO 抛出 JsonRPC网络异常
+                    throw new JsonRpcNetworkException();
                 }
 
                 byte[] receiveData = wait.getResult();
@@ -305,35 +307,37 @@ public class TcpRpcClient extends RpcClientBase {
                                 JsonRpcResponse response = null;
 
                                 try {
-
-                                    // 1. 解析为 JsonRpc 请求
                                     request = JsonUtils.deserialize(packet.getData(), JsonRpcRequest.class);
 
-                                    // 2. 获取 JsonRpc 请求的服务
+                                    // 根据类型获取指定的服务
                                     if (TcpRpcClient.this.getServices().containsKey(request.getType())) {
 
-                                        // 3. 获取指定服务对应类型的接口
-                                        RpcService service = TcpRpcClient.this.getServices().get(request.getType());
-                                        Class<?> type = service.getType();
+                                        // 获取服务类型对应的类型接口
+                                        Class<?> type = TcpRpcClient.this.getServices().get(request.getType()).getType();
 
-                                        // 4. 获取指定的方法
+                                        // 获取指定的成员
+                                        RpcTypeConverter typeConverter = TYPE_CONVERTER_MAP.get(request.getClientType());
+                                        RpcMethodConverter methodConverter = METHOD_CONVERTER_MAP.get(request.getClientType());
                                         JsonRpcRequest finalRequest = request;
                                         Optional<Method> methodOptional = Arrays.stream(type.getDeclaredMethods())
                                                 .filter(method -> {
-                                                    // 获取到指定的方法
-                                                    // TODO 这里还需要对不同语言的 getter setter 方法进行适配转换
 
-                                                    if (method.getName().equals(finalRequest.getMethod())) {
+                                                    // 使用指定客户端方法转换器比对服务方法和请求方法是否一致
+                                                    if (methodConverter != null && methodConverter.isEquals(method, finalRequest.getMethod())) {
+
                                                         // 获取参数列表
                                                         Parameter[] parameters = method.getParameters();
+
                                                         // 参数个数判断
                                                         if (parameters.length != finalRequest.getParameters().length) {
                                                             return false;
                                                         }
 
-                                                        // 参数名判断
+                                                        // 参数类型判断
                                                         for (int i = 0; i < parameters.length; i++) {
-                                                            if (!parameters[i].getType().getSimpleName().equals(finalRequest.getParameters()[i].getType())) {
+
+                                                            // 使用指定的客户端类型转换器比服务方法的参数类型是否一致
+                                                            if (!typeConverter.isEquals(parameters[i].getType(), finalRequest.getParameters()[i].getType())) {
                                                                 return false;
                                                             }
                                                         }
@@ -343,36 +347,83 @@ public class TcpRpcClient extends RpcClientBase {
                                                 })
                                                 .findFirst();
 
-                                        // 5. 准备调用
+                                        // 如果方法存在
                                         if (methodOptional.isPresent()) {
 
                                             Method method = methodOptional.get();
 
-                                            // 6. 准备调用时传递的参数
+                                            // 创建传参数组
                                             Object[] invokeArgs = new Object[request.getParameters().length];
 
-                                            // 7. 处理参数
-                                            Parameter[] methodParameters = method.getParameters();
+                                            // 获取方法中所有参数
+                                            Parameter[] parameters = method.getParameters();
 
+                                            // 将 Json 转换为对象
+                                            for (int i = 0; i < invokeArgs.length; i++) {
 
+                                                Class<?> parameterType = parameters[i].getType();
+                                                invokeArgs[i] = JsonUtils.deserialize((String) request.getParameters()[i].getValue(), parameterType);
+                                            }
+
+                                            // 调用方法
+                                            Object returnValue = method.invoke(TcpRpcClient.this.getServices().get(request.getType()).getInstance(), invokeArgs);
+
+                                            // 赋值返回值
+                                            response = JsonRpcResponse.createResult(returnValue);
+                                            response.setParameters(new JsonRpcParameter[invokeArgs.length]);
+
+                                            // 赋值改变的参数
+                                            for (int i = 0; i < invokeArgs.length; i++) {
+                                                JsonRpcParameter parameter = new JsonRpcParameter();
+                                                parameter.setType(parameters[i].getType().getSimpleName());
+                                                parameter.setValue(invokeArgs[i]);
+
+                                                response.getParameters()[i] = parameter;
+                                            }
                                         } else {
-                                            // 如果没有查找到对应的方法, 包装成方法未找到错误
-                                            response = JsonRpcResponse.createError(JsonRpcResponseError.createMethodNotFoundError(request.getMethod(), request.getMethod()));
+                                            response = JsonRpcResponse.createError(JsonRpcResponseError.createMethodNotFoundError(request.getType(), request.getMethod()));
                                         }
-
                                     } else {
-                                        // 如果没有查找到对应注册过的服务, 包装成类型未找到错误
                                         response = JsonRpcResponse.createError(JsonRpcResponseError.createTypeNotFoundError(request.getType()));
                                     }
-
-
-                                } catch (Exception e) {
+                                } catch (JSONException e) {
                                     // 包装成Json解析错误
                                     response = JsonRpcResponse.createError(JsonRpcResponseError.createFormatterError(e));
+                                } catch (InvocationTargetException e) {
+                                    // 包装成应用异常错误
+                                    response = JsonRpcResponse.createError(JsonRpcResponseError.createApplicationError(String.format("在执行方法“%s”时发生了异常", request.getMethod()), e));
+                                } catch (IllegalAccessException e) {
+                                    // 包装成应用异常错误
+                                    response = JsonRpcResponse.createError(JsonRpcResponseError.createApplicationError(String.format("无法执行方法“%s”, 指定的方法没有执行权限", request.getMethod()), e));
+                                } catch (Throwable e) {
+                                    // 包装成系统错误
+                                    response = JsonRpcResponse.createError(JsonRpcResponseError.createSystemError("发生错误", e));
                                 }
 
+                                byte[] responseData = null;
+                                do {
+                                    try {
+                                        responseData = JsonUtils.serializeToUtf8Bytes(response);
+                                    } catch (Exception e) {
+                                        // 发送一个错误防止对端卡住, 这个Json是一定可以被序列化的
+                                        response = JsonRpcResponse.createError(JsonRpcResponseError.createSystemError("发生错误", e));
+                                    }
+                                } while (responseData != null);
+
+                                try {
+                                    TcpRpcClient.this.sendResponse(packet.getTag(), responseData);
+                                } catch (IOException e) {
+                                    TcpRpcClient.this.invokeExceptionEvent(e);
+                                }
                                 break;
                             case RESPONSE:
+                                // 处理对端的 TCP 响应
+                                TcpWait wait = TcpRpcClient.this.waitReference.get(packet.getTag());
+                                if (wait != null) {
+                                    wait.setResponse(true);
+                                    wait.setResult(packet.getData());
+                                    LockSupport.unpark(wait.getWaitThread());
+                                }
                                 break;
                         }
                     }

@@ -91,6 +91,7 @@ public abstract class RpcClientBase extends ProxyBase {
 
         METHOD_CONVERTER_MAP = new HashMap<>();
         METHOD_CONVERTER_MAP.put(RpcClientType.Java, new RpcJavaMethodConverter());
+        METHOD_CONVERTER_MAP.put(RpcClientType.CSharp, new RpcCSharpMethodConverter());
     }
     //endregion
 
