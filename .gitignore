@@ -1,0 +1,6 @@
+# 项目排除路径
+/JieRuntime/target/
+/JieRuntime.IO/target/
+/JieRuntime.Net/target/
+/JieRuntime.Rpc/target/
+/JieRuntime.Test/target/
